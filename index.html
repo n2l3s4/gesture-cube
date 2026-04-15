@@ -238,7 +238,7 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const handsList = results.multiHandLandmarks || [];
 
-      handsList.forEach(() => drawHand(arguments[0], '#00ffff'));
+      handsList.forEach(lm => drawHand(lm, '#00ffff'));
 
       // Zoom with both hands pinching
       if (handsList.length === 2) {
