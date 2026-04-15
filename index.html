@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gesture Cube</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    #canvas-container {
+      position: absolute;
+      width: 100%; height: 100%;
+      top: 0; left: 0;
+    }
+    video, #overlay-canvas {
+      position: absolute;
+      width: 100%; height: 100%;
+      top: 0; left: 0;
+      object-fit: cover;
+      transform: scaleX(-1);
+      pointer-events: none;
+    }
+    #overlay-canvas {
+      z-index: 10;
+    }
+    .ui-layer {
+      position: absolute;
+      z-index: 20;
+      pointer-events: auto;
+    }
+    #mode-bar {
+      top: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      background: rgba(0,0,0,0.5);
+      padding: 8px 12px;
+      border-radius: 12px;
+      backdrop-filter: blur(6px);
+    }
+    .mode-btn {
+      padding: 8px 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      pointer-events: auto;
+    }
+    .mode-btn.active {
+      border-color: #00ffff;
+      background: rgba(0,255,255,0.2);
+      box-shadow: 0 0 12px rgba(0,255,255,0.4);
+    }
+    #instructions {
+      top: 80px;
+      left: 15px;
+      max-width: 320px;
+      background: rgba(0,0,0,0.55);
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.5;
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    #status-pill {
+      bottom: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 13px;
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    #start-screen {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      color: #fff;
+    }
+    #start-screen h1 {
+      font-size: 36px;
+      margin-bottom: 10px;
+      text-shadow: 0 0 20px rgba(0,255,255,0.5);
+    }
+    #start-screen p {
+      font-size: 15px;
+      opacity: 0.85;
+      margin-bottom: 24px;
+      text-align: center;
+      max-width: 480px;
+      line-height: 1.5;
+    }
+    #start-btn {
+      padding: 14px 32px;
+      font-size: 16px;
+      font-weight: 700;
+      color: #000;
+      background: #00ffff;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      box-shadow: 0 0 20px rgba(0,255,255,0.4);
+      transition: transform 0.15s ease;
+    }
+    #start-btn:hover { transform: scale(1.05); }
+  </style>
+</head>
+<body>
+  <div id="start-screen">
+    <h1>Gesture Cube</h1>
+    <p>Use your hands to control a 3D cube.<br>Allow camera access when prompted.</p>
+    <button id="start-btn">Start Game</button>
+  </div>
+
+  <div id="canvas-container"></div>
+  <video id="webcam" autoplay muted playsinline></video>
+  <canvas id="overlay-canvas"></canvas>
+
+  <div id="mode-bar" class="ui-layer">
+    <button class="mode-btn active" data-mode="move">Move</button>
+    <button class="mode-btn" data-mode="rotate">Rotate</button>
+    <button class="mode-btn" data-mode="zoom">Zoom</button>
+  </div>
+
+  <div id="instructions" class="ui-layer">
+    <strong>How to play</strong><br>
+    • <b>Move</b>: pinch thumb + index to drag the cube<br>
+    • <b>Rotate</b>: pinch and move hand left/right/up/down<br>
+    • <b>Zoom</b>: pinch with both hands and spread them
+  </div>
+
+  <div id="status-pill" class="ui-layer">Waiting for camera...</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <script>
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playTone(freq, type='sine', duration=0.15, vol=0.08) {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    }
+    function playMoveSound() { playTone(320, 'sine', 0.1, 0.06); }
+    function playRotateSound() { playTone(260, 'triangle', 0.12, 0.06); }
+    function playZoomSound() { playTone(180, 'sine', 0.15, 0.08); }
+    function playModeSound() { playTone(440, 'sine', 0.18, 0.08); }
+    function playStartSound() {
+      [0, 0.1, 0.2].forEach((d, i) => setTimeout(() => playTone(330 + i*110, 'sine', 0.25, 0.1), d*1000));
+    }
+
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 5;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight.position.set(3, 4, 5);
+    scene.add(dirLight);
+    const backLight = new THREE.DirectionalLight(0x00ffff, 0.3);
+    backLight.position.set(-3, -2, -5);
+    scene.add(backLight);
+
+    const geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x00aaff,
+      emissive: 0x002244,
+      roughness: 0.3,
+      metalness: 0.2,
+    });
+    const cube = new THREE.Mesh(geometry, material);
+    scene.add(cube);
+
+    const edges = new THREE.EdgesGeometry(geometry);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 2 });
+    const wireframe = new THREE.LineSegments(edges, lineMat);
+    cube.add(wireframe);
+
+    let mode = 'move';
+    let isPinching = false;
+    let pinchStartPos = null;
+    let cubeStartPos = null;
+    let cubeStartRot = null;
+    let startScale = 1;
+    let startPinchDistance = 0;
+    let lastSoundTime = 0;
+
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('overlay-canvas');
+    const ctx = canvas.getContext('2d');
+    const statusPill = document.getElementById('status-pill');
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      resizeCanvas();
+    });
+
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        mode = btn.dataset.mode;
+        playModeSound();
+        isPinching = false;
+      });
+    });
+
+    function get3DCoords(normX, normY, zDepth = 0) {
+      const vec = new THREE.Vector3((normX - 0.5) * 2, -(normY - 0.5) * 2, 0.5);
+      vec.unproject(camera);
+      const dir = vec.sub(camera.position).normalize();
+      const distance = (zDepth - camera.position.z) / dir.z;
+      return camera.position.clone().add(dir.multiplyScalar(distance));
+    }
+
+    function isPinch(landmarks) {
+      const d = Math.hypot(landmarks[4].x - landmarks[8].x, landmarks[4].y - landmarks[8].y);
+      return d < 0.06;
+    }
+
+    function drawHand(landmarks, color) {
+      ctx.fillStyle = color;
+      [4, 8, 12, 16, 20].forEach(i => {
+        const x = landmarks[i].x * canvas.width;
+        const y = landmarks[i].y * canvas.height;
+        ctx.beginPath();
+        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(landmarks[4].x * canvas.width, landmarks[4].y * canvas.height);
+      ctx.lineTo(landmarks[8].x * canvas.width, landmarks[8].y * canvas.height);
+      ctx.stroke();
+    }
+
+    const hands = new Hands({ locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+    hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+
+    hands.onResults(results => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const handsList = results.multiHandLandmarks || [];
+
+      handsList.forEach((lm) => {
+        const colors = { move: '#00ffff', rotate: '#ff00ff', zoom: '#ffff00' };
+        drawHand(lm, colors[mode] || '#00ffff');
+      });
+
+      if (mode === 'zoom') {
+        if (handsList.length === 2) {
+          const left = handsList[0];
+          const right = handsList[1];
+          const leftPinch = isPinch(left);
+          const rightPinch = isPinch(right);
+          const cx1 = left[8].x, cy1 = left[8].y;
+          const cx2 = right[8].x, cy2 = right[8].y;
+          const dist = Math.hypot(cx1 - cx2, cy1 - cy2);
+
+          if (leftPinch && rightPinch) {
+            if (!isPinching) {
+              isPinching = true;
+              startPinchDistance = dist;
+              startScale = cube.scale.x;
+            } else {
+              const ratio = dist / (startPinchDistance || 1);
+              const newScale = Math.max(0.3, Math.min(4, startScale * ratio));
+              cube.scale.set(newScale, newScale, newScale);
+              if (Date.now() - lastSoundTime > 120) {
+                playZoomSound();
+                lastSoundTime = Date.now();
+              }
+            }
+            statusPill.textContent = 'Zooming 🔍';
+            return;
+          }
+        }
+        isPinching = false;
+        statusPill.textContent = 'Zoom mode: pinch with both hands';
+        return;
+      }
+
+      if (handsList.length > 0) {
+        const hand = handsList[0];
+        const pinching = isPinch(hand);
+        const tip = hand[8];
+
+        if (pinching) {
+          if (!isPinching) {
+            isPinching = true;
+            pinchStartPos = { x: tip.x, y: tip.y };
+            cubeStartPos = cube.position.clone();
+            cubeStartRot = { x: cube.rotation.x, y: cube.rotation.y };
+          } else {
+            if (mode === 'move') {
+              const dx = (tip.x - pinchStartPos.x) * 10;
+              const dy = (pinchStartPos.y - tip.y) * 10;
+              cube.position.set(cubeStartPos.x + dx, cubeStartPos.y + dy, cubeStartPos.z);
+              if (Date.now() - lastSoundTime > 100) {
+                playMoveSound();
+                lastSoundTime = Date.now();
+              }
+              statusPill.textContent = 'Moving cube ✋';
+            } else if (mode === 'rotate') {
+              const dx = (tip.x - pinchStartPos.x) * 5;
+              const dy = (tip.y - pinchStartPos.y) * 5;
+              cube.rotation.y = cubeStartRot.y + dx;
+              cube.rotation.x = cubeStartRot.x + dy;
+              if (Date.now() - lastSoundTime > 100) {
+                playRotateSound();
+                lastSoundTime = Date.now();
+              }
+              statusPill.textContent = 'Rotating cube 🔄';
+            }
+          }
+        } else {
+          isPinching = false;
+          statusPill.textContent = mode === 'move' ? 'Pinch to grab cube' : 'Pinch to rotate cube';
+        }
+      } else {
+        isPinching = false;
+        statusPill.textContent = 'Show your hand';
+      }
+    });
+
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+      video.srcObject = stream;
+      await new Promise(resolve => video.onloadedmetadata = resolve);
+      const cam = new Camera(video, {
+        onFrame: async () => await hands.send({ image: video }),
+        width: video.videoWidth,
+        height: video.videoHeight
+      });
+      cam.start();
+      statusPill.textContent = 'Camera active — show your hand!';
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      if (mode !== 'rotate' && !isPinching) {
+        cube.rotation.x += 0.003;
+        cube.rotation.y += 0.005;
+      }
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    document.getElementById('start-btn').addEventListener('click', () => {
+      document.getElementById('start-screen').style.display = 'none';
+      playStartSound();
+      startCamera().catch(err => {
+        statusPill.textContent = 'Camera error: ' + err.message;
+        console.error(err);
+      });
+    });
+  </script>
+</body>
+</html>
