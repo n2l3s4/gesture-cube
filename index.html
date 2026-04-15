@@ -16,16 +16,24 @@
       position: absolute;
       width: 100%; height: 100%;
       top: 0; left: 0;
+      z-index: 2;
     }
-    video, #overlay-canvas {
+    video {
       position: absolute;
       width: 100%; height: 100%;
       top: 0; left: 0;
       object-fit: cover;
       transform: scaleX(-1);
       pointer-events: none;
+      z-index: 1;
     }
     #overlay-canvas {
+      position: absolute;
+      width: 100%; height: 100%;
+      top: 0; left: 0;
+      object-fit: cover;
+      transform: scaleX(-1);
+      pointer-events: none;
       z-index: 10;
     }
     .ui-layer {
@@ -373,7 +381,8 @@
       const cam = new Camera(video, {
         onFrame: async () => await hands.send({ image: video }),
         width: video.videoWidth,
-        height: video.videoHeight
+        height: video.videoHeight,
+        selfieMode: true
       });
       cam.start();
       statusPill.textContent = 'Camera active — show your hand!';
