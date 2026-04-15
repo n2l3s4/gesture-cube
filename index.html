@@ -185,7 +185,7 @@
     const wireframe = new THREE.LineSegments(edges, lineMat);
     cube.add(wireframe);
 
-    let isPinching = false;
+    let activeGesture = null; // 'zoom' | 'rotate' | null
     let pinchStartPos = null;
     let cubeStartRot = null;
     let startScale = 1;
@@ -237,65 +237,54 @@
     hands.onResults(results => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const handsList = results.multiHandLandmarks || [];
-
       handsList.forEach(lm => drawHand(lm, '#00ffff'));
 
-      // Zoom with both hands pinching
-      if (handsList.length === 2) {
-        const left = handsList[0];
-        const right = handsList[1];
-        const leftPinch = isPinch(left);
-        const rightPinch = isPinch(right);
-        const cx1 = left[8].x, cy1 = left[8].y;
-        const cx2 = right[8].x, cy2 = right[8].y;
-        const dist = Math.hypot(cx1 - cx2, cy1 - cy2);
+      const twoHandsPinch = handsList.length === 2 && isPinch(handsList[0]) && isPinch(handsList[1]);
+      const oneHandPinch = handsList.length > 0 && isPinch(handsList[0]);
 
-        if (leftPinch && rightPinch) {
-          if (!isPinching) {
-            isPinching = true;
-            startPinchDistance = dist;
-            startScale = cube.scale.x;
-          } else {
-            const ratio = dist / (startPinchDistance || 1);
-            const newScale = Math.max(0.3, Math.min(4, startScale * ratio));
-            cube.scale.set(newScale, newScale, newScale);
-            if (Date.now() - lastSoundTime > 120) {
-              playZoomSound();
-              lastSoundTime = Date.now();
-            }
+      if (twoHandsPinch) {
+        if (activeGesture !== 'zoom') {
+          activeGesture = 'zoom';
+          const left = handsList[0], right = handsList[1];
+          startPinchDistance = Math.hypot(left[8].x - right[8].x, left[8].y - right[8].y);
+          startScale = cube.scale.x;
+        } else {
+          const left = handsList[0], right = handsList[1];
+          const dist = Math.hypot(left[8].x - right[8].x, left[8].y - right[8].y);
+          const ratio = dist / (startPinchDistance || 1);
+          const newScale = Math.max(0.3, Math.min(4, startScale * ratio));
+          cube.scale.set(newScale, newScale, newScale);
+          if (Date.now() - lastSoundTime > 120) {
+            playZoomSound();
+            lastSoundTime = Date.now();
           }
-          statusPill.textContent = 'Zooming 🔍';
-          return;
         }
+        statusPill.textContent = 'Zooming 🔍';
+        return;
       }
 
-      // Rotate with single hand pinch
-      if (handsList.length > 0) {
-        const hand = handsList[0];
-        const pinching = isPinch(hand);
-        const tip = hand[8];
-
-        if (pinching) {
-          if (!isPinching) {
-            isPinching = true;
-            pinchStartPos = { x: tip.x, y: tip.y };
-            cubeStartRot = { x: cube.rotation.x, y: cube.rotation.y };
-          } else {
-            const dx = (tip.x - pinchStartPos.x) * 5;
-            const dy = (tip.y - pinchStartPos.y) * 5;
-            cube.rotation.y = cubeStartRot.y + dx;
-            cube.rotation.x = cubeStartRot.x + dy;
-            if (Date.now() - lastSoundTime > 100) {
-              playRotateSound();
-              lastSoundTime = Date.now();
-            }
-            statusPill.textContent = 'Rotating cube 🔄';
+      if (oneHandPinch) {
+        if (activeGesture !== 'rotate') {
+          activeGesture = 'rotate';
+          const tip = handsList[0][8];
+          pinchStartPos = { x: tip.x, y: tip.y };
+          cubeStartRot = { x: cube.rotation.x, y: cube.rotation.y };
+        } else {
+          const tip = handsList[0][8];
+          const dx = (tip.x - pinchStartPos.x) * 5;
+          const dy = (tip.y - pinchStartPos.y) * 5;
+          cube.rotation.y = cubeStartRot.y + dx;
+          cube.rotation.x = cubeStartRot.x + dy;
+          if (Date.now() - lastSoundTime > 100) {
+            playRotateSound();
+            lastSoundTime = Date.now();
           }
-          return;
         }
+        statusPill.textContent = 'Rotating cube 🔄';
+        return;
       }
 
-      isPinching = false;
+      activeGesture = null;
       statusPill.textContent = handsList.length >= 2 ? 'Pinch both hands to zoom' : 'Pinch to rotate cube';
     });
 
@@ -306,8 +295,7 @@
       const cam = new Camera(video, {
         onFrame: async () => await hands.send({ image: video }),
         width: video.videoWidth,
-        height: video.videoHeight,
-        selfieMode: true
+        height: video.videoHeight
       });
       cam.start();
       statusPill.textContent = 'Camera active — show your hand!';
@@ -315,7 +303,7 @@
 
     function animate() {
       requestAnimationFrame(animate);
-      if (!isPinching) {
+      if (activeGesture !== 'rotate') {
         cube.rotation.x += 0.003;
         cube.rotation.y += 0.005;
       }
